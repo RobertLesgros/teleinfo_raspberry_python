@@ -1,0 +1,13 @@
+[Unit]
+Description=Teleinfo compteur Enedis
+After=network.target
+
+[Service]
+Type=simple
+ExecStartPre=sleep 10
+ExecStart=/usr/bin/python3 /home/dietpi/teleinfo.py
+Restart=always
+User=dietpi
+
+[Install]
+WantedBy=default.target
