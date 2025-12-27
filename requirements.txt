@@ -1,0 +1,7 @@
+# Dépendances Python pour Teleinfo Raspberry Pi
+
+# Communication série avec le module PITInfo
+pyserial>=3.5
+
+# Client MQTT pour la publication vers Home Assistant
+paho-mqtt>=1.6.0

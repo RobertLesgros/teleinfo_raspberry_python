@@ -1,0 +1,13 @@
+# Configuration MQTT pour Teleinfo
+# Copier ce fichier vers credits.py et renseigner vos valeurs
+
+# Identifiants du broker MQTT
+mqtt_username = "votre_utilisateur"
+mqtt_password = "votre_mot_de_passe"
+
+# Adresse et port du broker MQTT
+mqtt_broker_address = "192.168.1.100"  # Remplacer par l'IP de votre broker
+mqtt_broker_port = 1883
+
+# Activer les logs détaillés (True/False)
+enable_logs = True
