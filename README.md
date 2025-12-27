@@ -2,6 +2,14 @@
 
 Ce projet permet de lire les données de téléinformation d'un compteur Linky Enedis via un Raspberry Pi et de les publier sur un broker MQTT pour les intégrer à Home Assistant.
 
+## Fonctionnalités
+
+- **Validation robuste des données** : Vérification du checksum de chaque ligne téléinfo
+- **Gestion des erreurs de transmission** : Timeout, erreurs de décodage, valeurs aberrantes
+- **Statistiques de qualité de ligne** : Taux d'erreur publié sur MQTT
+- **Home Assistant Discovery** : Configuration automatique des capteurs
+- **Validation des valeurs** : Bornes min/max pour PAPP, index croissants obligatoires
+
 ## Prérequis matériels
 
 - **Raspberry Pi** (testé sur Pi Zero, Pi 3, Pi 4)
@@ -123,10 +131,14 @@ ExecStart=/usr/bin/python3 /home/pi/teleinfo_raspberry_python/teleinfo.py
 Restart=always
 User=pi
 WorkingDirectory=/home/pi/teleinfo_raspberry_python
+# Optionnel : spécifier un port série différent
+# Environment=TELEINFO_SERIAL_PORT=/dev/ttyAMA0
 
 [Install]
 WantedBy=multi-user.target
 ```
+
+**Note** : Le port série peut être configuré via la variable d'environnement `TELEINFO_SERIAL_PORT`. Par défaut : `/dev/ttyS0`.
 
 Activer et démarrer le service :
 
@@ -155,9 +167,13 @@ tail -f ~/teleinfo_raspberry_python/teleinfo.log
 
 Le script publie automatiquement la configuration MQTT Discovery. Les entités suivantes seront créées automatiquement :
 
+### Capteurs principaux
+
 | Entité | Description | Unité |
 |--------|-------------|-------|
-| `PAPP` | Puissance apparente instantanée | W |
+| `PAPP` | Puissance apparente instantanée | VA |
+| `IINST` | Intensité instantanée | A |
+| `ISOUSC` | Intensité souscrite | A |
 | `BBRHCJB` | Index Heures Creuses Jours Bleus | Wh |
 | `BBRHPJB` | Index Heures Pleines Jours Bleus | Wh |
 | `BBRHCJW` | Index Heures Creuses Jours Blancs | Wh |
@@ -166,6 +182,22 @@ Le script publie automatiquement la configuration MQTT Discovery. Les entités s
 | `BBRHPJR` | Index Heures Pleines Jours Rouges | Wh |
 | `PTEC` | Période tarifaire en cours | - |
 | `DEMAIN` | Couleur du lendemain (Tempo) | - |
+| `ADPS` | Avertissement dépassement puissance | A |
+
+### Statistiques de qualité de ligne
+
+Publiées toutes les 5 minutes sur `teleinfo/stats/*` :
+
+| Statistique | Description |
+|-------------|-------------|
+| `trames_recues` | Nombre total de trames reçues |
+| `trames_valides` | Nombre de trames avec au moins une ligne valide |
+| `erreurs_checksum` | Lignes rejetées pour checksum invalide |
+| `erreurs_decodage` | Erreurs de décodage ASCII |
+| `erreurs_timeout` | Timeouts en lecture de trame |
+| `valeurs_hors_bornes` | Valeurs rejetées (hors limites ou non croissantes) |
+
+Un taux d'erreur élevé indique un problème de câblage ou une ligne trop longue.
 
 ## Dépannage
 
@@ -191,6 +223,24 @@ sudo usermod -a -G dialout $USER
   sudo cat /dev/ttyS0
   ```
   Vous devriez voir des caractères défiler si le compteur envoie des données.
+
+### Taux d'erreur élevé (erreurs checksum)
+
+Si les statistiques montrent beaucoup d'erreurs de checksum, cela indique des problèmes de transmission :
+
+1. **Ligne trop longue** : Raccourcir le câble entre le compteur et le module PITInfo
+2. **Interférences électromagnétiques** : Éloigner le câble des sources de parasites (moteurs, variateurs)
+3. **Câble inadapté** : Utiliser du câble blindé ou torsadé
+4. **Mauvais contact** : Vérifier les connexions sur les bornes I1/I2
+
+Pour diagnostiquer, consulter les logs :
+```bash
+# Voir le taux d'erreur dans les logs
+grep "Taux erreur" ~/teleinfo_raspberry_python/teleinfo.log
+
+# Voir les statistiques MQTT
+mosquitto_sub -h <ip_broker> -t "teleinfo/stats/#" -v
+```
 
 ## Références
 
