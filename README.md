@@ -9,6 +9,7 @@ Ce projet permet de lire les données de téléinformation d'un compteur Linky E
 - **Statistiques de qualité de ligne** : Taux d'erreur publié sur MQTT
 - **Home Assistant Discovery** : Configuration automatique des capteurs
 - **Validation des valeurs** : Bornes min/max pour PAPP, index croissants obligatoires
+- **Export InfluxDB** : Stockage des données dans une base de données InfluxDB pour historique et graphiques (optionnel)
 
 ## Prérequis matériels
 
@@ -98,6 +99,38 @@ mqtt_broker_address = "192.168.1.xxx"  # IP de votre broker MQTT
 mqtt_broker_port = 1883
 enable_logs = True
 ```
+
+### Étape 6bis (optionnel) : Configurer l'export InfluxDB
+
+Si vous souhaitez stocker les données dans InfluxDB pour créer des graphiques historiques (avec Grafana par exemple), ajoutez la configuration suivante dans `credits.py` :
+
+```python
+# --- Configuration InfluxDB ---
+enable_influxdb = True
+
+# URL du serveur InfluxDB
+influxdb_url = "http://192.168.1.xxx:8086"
+
+# Token d'authentification (généré dans InfluxDB: Data > API Tokens)
+influxdb_token = "votre_token_influxdb"
+
+# Organisation et bucket (à créer dans InfluxDB au préalable)
+influxdb_org = "home"
+influxdb_bucket = "teleinfo"
+
+# Tag pour identifier le compteur (utile si plusieurs compteurs)
+influxdb_location = "maison"
+```
+
+Installez également la dépendance InfluxDB :
+```bash
+pip3 install influxdb-client
+```
+
+**Prérequis InfluxDB :**
+1. Avoir un serveur InfluxDB 2.x fonctionnel
+2. Créer une organisation et un bucket "teleinfo"
+3. Générer un token API avec droits d'écriture sur le bucket
 
 ### Étape 7 : Tester le script manuellement
 

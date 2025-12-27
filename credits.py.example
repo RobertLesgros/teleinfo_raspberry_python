@@ -11,3 +11,23 @@ mqtt_broker_port = 1883
 
 # Activer les logs détaillés (True/False)
 enable_logs = True
+
+# --- Configuration InfluxDB (optionnel) ---
+# Mettre enable_influxdb à True pour activer l'export vers InfluxDB
+enable_influxdb = False
+
+# URL du serveur InfluxDB (ex: "http://192.168.1.100:8086")
+influxdb_url = "http://localhost:8086"
+
+# Token d'authentification InfluxDB
+# Généré dans InfluxDB: Data > Tokens > Generate Token
+influxdb_token = "votre_token_influxdb"
+
+# Organisation InfluxDB
+influxdb_org = "votre_organisation"
+
+# Bucket de destination (doit être créé au préalable dans InfluxDB)
+influxdb_bucket = "teleinfo"
+
+# Tag de localisation (optionnel, pour identifier le compteur)
+influxdb_location = "maison"
