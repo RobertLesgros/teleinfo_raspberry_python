@@ -9,12 +9,40 @@ import logging
 import signal
 import json
 import os
+from datetime import datetime, timezone
 
 # Chemin du script pour les fichiers relatifs
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPT_DIR)
 
 from credits import mqtt_username, mqtt_password, mqtt_broker_address, mqtt_broker_port, enable_logs
+
+# Import optionnel de la configuration InfluxDB
+try:
+    from credits import (
+        enable_influxdb, influxdb_url, influxdb_token,
+        influxdb_org, influxdb_bucket, influxdb_location
+    )
+except ImportError:
+    enable_influxdb = False
+    influxdb_url = None
+    influxdb_token = None
+    influxdb_org = None
+    influxdb_bucket = None
+    influxdb_location = "maison"
+
+# Import conditionnel du client InfluxDB
+influx_client = None
+influx_write_api = None
+if enable_influxdb:
+    try:
+        from influxdb_client import InfluxDBClient, Point, WritePrecision
+        from influxdb_client.client.write_api import SYNCHRONOUS
+        from urllib3 import Retry
+    except ImportError:
+        print("ERREUR: influxdb-client n'est pas installé.")
+        print("Installez-le avec: pip install influxdb-client")
+        enable_influxdb = False
 
 # Configurations
 hassDiscoveryPrefix = "homeassistant"
@@ -283,9 +311,9 @@ def on_disconnect(mqttc, obj, rc):
 
 def cleanup():
     """Ferme proprement les ressources ouvertes."""
-    print("Fermeture du port série...")
+    print("Fermeture des connexions...")
     if enable_logs:
-        logging.info("Fermeture du port série...")
+        logging.info("Fermeture des connexions...")
         logging.info(f"Statistiques finales: {json.dumps(stats)}")
     if ser:
         ser.close()
@@ -293,6 +321,9 @@ def cleanup():
         mqttc.disconnect()
     except:
         pass
+    # Fermer InfluxDB si activé
+    if enable_influxdb:
+        close_influxdb()
 
 
 def log_and_publish(topic, value):
@@ -338,6 +369,106 @@ def publish_stats(mqttc):
         mqttc.publish(f"{mqttBaseTopic}/stats/{stat_name}", stat_value)
 
 
+def init_influxdb():
+    """Initialise la connexion InfluxDB avec gestion des retry."""
+    global influx_client, influx_write_api
+
+    if not enable_influxdb:
+        return False
+
+    try:
+        # Configuration des retry pour la connexion
+        retries = Retry(connect=4, read=2, redirect=5, backoff_factor=0.5)
+
+        influx_client = InfluxDBClient(
+            url=influxdb_url,
+            token=influxdb_token,
+            org=influxdb_org,
+            retries=retries
+        )
+
+        # Test de connexion
+        health = influx_client.health()
+        if health.status != "pass":
+            print(f"AVERTISSEMENT: InfluxDB health check: {health.status}")
+            if enable_logs:
+                logging.warning(f"InfluxDB health check: {health.status}")
+
+        # Initialisation de l'API d'écriture en mode synchrone
+        influx_write_api = influx_client.write_api(write_options=SYNCHRONOUS)
+
+        print(f"Connexion InfluxDB établie: {influxdb_url}")
+        if enable_logs:
+            logging.info(f"Connexion InfluxDB établie: {influxdb_url}, bucket: {influxdb_bucket}")
+
+        return True
+
+    except Exception as e:
+        print(f"Erreur connexion InfluxDB: {e}")
+        if enable_logs:
+            logging.error(f"Erreur connexion InfluxDB: {e}")
+        return False
+
+
+def write_to_influxdb(measurement, value, field_type="float"):
+    """
+    Écrit un point de données vers InfluxDB.
+
+    Args:
+        measurement: Nom de la mesure (ex: PAPP, IINST, etc.)
+        value: Valeur à enregistrer
+        field_type: Type de la valeur ("float", "int", "string")
+    """
+    global influx_write_api
+
+    if not enable_influxdb or influx_write_api is None:
+        return
+
+    try:
+        # Conversion de la valeur selon le type
+        if field_type == "int":
+            typed_value = int(value)
+        elif field_type == "float":
+            typed_value = float(value)
+        else:
+            typed_value = str(value)
+
+        # Création du point avec timestamp UTC
+        point = (
+            Point(measurement)
+            .tag("location", influxdb_location)
+            .field("value", typed_value)
+            .time(datetime.now(timezone.utc), WritePrecision.S)
+        )
+
+        # Écriture vers InfluxDB
+        influx_write_api.write(bucket=influxdb_bucket, org=influxdb_org, record=point)
+
+        if enable_logs:
+            logging.debug(f"InfluxDB: {measurement} = {typed_value}")
+
+    except Exception as e:
+        if enable_logs:
+            logging.error(f"Erreur écriture InfluxDB {measurement}: {e}")
+
+
+def close_influxdb():
+    """Ferme proprement la connexion InfluxDB."""
+    global influx_client, influx_write_api
+
+    if influx_write_api:
+        try:
+            influx_write_api.close()
+        except:
+            pass
+
+    if influx_client:
+        try:
+            influx_client.close()
+        except:
+            pass
+
+
 # --- Programme principal ---
 
 print("Lancement téléinfo")
@@ -364,6 +495,13 @@ try:
     mqttc.connect(mqtt_broker_address, mqtt_broker_port, 60)
     mqttc.loop_start()
 
+    # Initialisation InfluxDB si activé
+    if enable_influxdb:
+        if init_influxdb():
+            print("Export InfluxDB activé")
+        else:
+            print("Export InfluxDB désactivé (erreur de connexion)")
+
     last_stats_publish = 0
     STATS_INTERVAL = 300  # Publier les stats toutes les 5 minutes
 
@@ -377,12 +515,14 @@ try:
                 if est_valide_index(key, value):
                     log_and_publish(f"{mqttBaseTopic}/{key}", value)
                     publish_sensor_configuration(mqttc, key, "Wh", "total_increasing", "energy")
+                    write_to_influxdb(key, value, "int")
 
             # Puissance apparente instantanée
             elif key == "PAPP":
                 if est_valide_papp(value):
                     log_and_publish(f"{mqttBaseTopic}/{key}", value)
                     publish_sensor_configuration(mqttc, key, "VA", "measurement", "apparent_power")
+                    write_to_influxdb(key, value, "int")
 
             # Intensité instantanée
             elif key == "IINST":
@@ -391,6 +531,7 @@ try:
                     if 0 <= iinst <= 90:  # Max 90A pour un compteur standard
                         log_and_publish(f"{mqttBaseTopic}/{key}", value)
                         publish_sensor_configuration(mqttc, key, "A", "measurement", "current")
+                        write_to_influxdb(key, value, "int")
                 except ValueError:
                     pass
 
@@ -399,12 +540,14 @@ try:
                 if est_valide_demain(value):
                     log_and_publish(f"{mqttBaseTopic}/{key}", value)
                     publish_sensor_configuration(mqttc, key, None, None, None)
+                    write_to_influxdb(key, value, "string")
 
             # Période tarifaire en cours
             elif key == "PTEC":
                 if est_valide_ptec(value):
                     log_and_publish(f"{mqttBaseTopic}/{key}", value)
                     publish_sensor_configuration(mqttc, key, None, None, None)
+                    write_to_influxdb(key, value, "string")
                 else:
                     if enable_logs:
                         logging.warning(f"Valeur invalide pour PTEC: {value}")
@@ -416,6 +559,7 @@ try:
                     if 0 < isousc <= 90:
                         log_and_publish(f"{mqttBaseTopic}/{key}", value)
                         publish_sensor_configuration(mqttc, key, "A", None, "current")
+                        write_to_influxdb(key, value, "int")
                 except ValueError:
                     pass
 
@@ -423,6 +567,7 @@ try:
             elif key == "ADPS":
                 log_and_publish(f"{mqttBaseTopic}/{key}", value)
                 publish_sensor_configuration(mqttc, key, "A", None, None)
+                write_to_influxdb(key, value, "int")
 
         # Publier les statistiques périodiquement
         current_time = time.time()
