@@ -1,0 +1,22 @@
+le PRojet se base sur : https://faire-ca-soi-meme.fr/domotique/2016/09/12/module-teleinformation-tic/
+et sur le module PITInfo : https://www.tindie.com/products/Hallard/pitinfo/ et https://hallard.me/pitinfov12/
+
+il s'agit selon  
+
+https://hallard.me/blog/wp-content/uploads/2015/10/schma-final-tlinfo-transistor-fet.jpg
+le raspberry execute ce service  :
+/etc/systemd/system/teleinfo.service
+[Unit]
+Description=Teleinfo compteur Enedis
+After=network.target
+
+[Service]
+Type=simple
+ExecStartPre=sleep 10
+ExecStart=/usr/bin/python3 /home/dietpi/teleinfo.py
+Restart=always
+User=dietpi
+
+[Install]
+WantedBy=default.target
+
