@@ -275,6 +275,15 @@ grep "Taux erreur" ~/teleinfo_raspberry_python/teleinfo.log
 mosquitto_sub -h <ip_broker> -t "teleinfo/stats/#" -v
 ```
 
+## Fiabilité et durée de vie de la carte SD
+
+Ce service tourne 24/7 et écrit régulièrement sur la carte SD (logs, statistiques). Sur une carte SD grand public, cela peut accélérer l'usure et provoquer une corruption après plusieurs mois/années. Le script limite désormais la taille du fichier de log (rotation automatique à 1 Mo, 3 fichiers d'historique conservés), mais pour aller plus loin :
+
+- **Utiliser une carte SD endurance/industrielle** (ex. SanDisk Max Endurance, Samsung PRO Endurance) plutôt qu'une carte grand public
+- **Démarrer sur SSD USB** si votre modèle de Raspberry Pi le permet (Pi 4/5) : bien plus fiable et rapide qu'une carte SD dans la durée
+- **Monter `/var/log` en tmpfs** ou utiliser `log2ram` pour éviter les écritures fréquentes sur la carte SD
+- **Faire des sauvegardes régulières** de l'image système (`dd` ou `rpi-clone`) pour repartir rapidement en cas de panne
+
 ## Références
 
 - [Module PITInfo v1.2](https://hallard.me/pitinfov12/)

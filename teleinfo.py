@@ -59,12 +59,17 @@ PAPP_MAX = 36000  # 36 kVA max pour un compteur monophasé standard
 TRAME_TIMEOUT = 10
 
 # Configuration des logs
+# RotatingFileHandler pour éviter la croissance illimitée du fichier de log
+# (usure inutile de la carte SD sur un système qui tourne 24/7)
+from logging.handlers import RotatingFileHandler
+
 log_file = os.path.join(SCRIPT_DIR, 'teleinfo.log')
-logging.basicConfig(
-    filename=log_file,
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
+log_handler = RotatingFileHandler(
+    log_file, maxBytes=1_000_000, backupCount=3  # 1 Mo x 4 fichiers max
 )
+log_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+logging.getLogger().addHandler(log_handler)
+logging.getLogger().setLevel(logging.INFO)
 
 ser = None
 run = True
@@ -295,18 +300,30 @@ def decodeTrame(trame):
     return result
 
 
-def on_disconnect(mqttc, obj, rc):
-    """Callback appelé lors de la déconnexion du broker MQTT."""
+def on_disconnect(*args):
+    """
+    Callback appelé lors de la déconnexion du broker MQTT.
+    Signature variable acceptée (*args) car elle diffère entre
+    paho-mqtt 1.x (client, userdata, rc) et 2.x (client, userdata, rc, properties).
+    """
+    mqttc_local = args[0]
     print("Connexion MQTT perdue. Reconnexion en cours...")
     if enable_logs:
         logging.warning("Connexion MQTT perdue. Reconnexion en cours...")
 
     try:
-        mqttc.reconnect()
-    except ConnectionRefusedError:
+        mqttc_local.reconnect()
+    except (ConnectionRefusedError, OSError) as e:
         print("La tentative de reconnexion a échoué. Réessayer plus tard.")
         if enable_logs:
-            logging.error("La tentative de reconnexion a échoué.")
+            logging.error(f"La tentative de reconnexion a échoué: {e}")
+
+
+def on_connect(*args):
+    """Callback appelé lors de la connexion (initiale ou reconnexion) au broker MQTT."""
+    print("Connecté au broker MQTT.")
+    if enable_logs:
+        logging.info("Connecté au broker MQTT.")
 
 
 def cleanup():
@@ -474,25 +491,58 @@ def close_influxdb():
 print("Lancement téléinfo")
 print(f"Port série: {SERIAL_PORT}")
 
-mqttc = mqtt.Client(client_id="teleinfo")
+try:
+    # paho-mqtt 2.x exige explicitement la version de callback API ;
+    # paho-mqtt 1.x ne connaît pas ce paramètre.
+    mqttc = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1, client_id="teleinfo")
+except AttributeError:
+    mqttc = mqtt.Client(client_id="teleinfo")
+
 mqttc.username_pw_set(mqtt_username, mqtt_password)
 mqttc.on_disconnect = on_disconnect
+mqttc.on_connect = on_connect
+
+# Nombre de tentatives avant abandon à l'ouverture du port série / connexion MQTT
+STARTUP_RETRIES = 5
+STARTUP_RETRY_DELAY = 5  # secondes
 
 try:
-    ser = serial.Serial(
-        port=SERIAL_PORT,
-        baudrate=1200,
-        bytesize=serial.SEVENBITS,
-        parity=serial.PARITY_EVEN,
-        stopbits=serial.STOPBITS_ONE,
-        xonxoff=False,
-        timeout=1
-    )
+    ser = None
+    for tentative in range(1, STARTUP_RETRIES + 1):
+        try:
+            ser = serial.Serial(
+                port=SERIAL_PORT,
+                baudrate=1200,
+                bytesize=serial.SEVENBITS,
+                parity=serial.PARITY_EVEN,
+                stopbits=serial.STOPBITS_ONE,
+                xonxoff=False,
+                timeout=1
+            )
+            break
+        except serial.SerialException as e:
+            print(f"Port série indisponible ({e}), tentative {tentative}/{STARTUP_RETRIES}")
+            if enable_logs:
+                logging.warning(f"Port série indisponible ({e}), tentative {tentative}/{STARTUP_RETRIES}")
+            if tentative == STARTUP_RETRIES:
+                raise
+            time.sleep(STARTUP_RETRY_DELAY)
 
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)  # Pour arrêt via systemd
 
-    mqttc.connect(mqtt_broker_address, mqtt_broker_port, 60)
+    for tentative in range(1, STARTUP_RETRIES + 1):
+        try:
+            mqttc.connect(mqtt_broker_address, mqtt_broker_port, 60)
+            break
+        except (ConnectionRefusedError, OSError) as e:
+            print(f"Connexion MQTT impossible ({e}), tentative {tentative}/{STARTUP_RETRIES}")
+            if enable_logs:
+                logging.warning(f"Connexion MQTT impossible ({e}), tentative {tentative}/{STARTUP_RETRIES}")
+            if tentative == STARTUP_RETRIES:
+                raise
+            time.sleep(STARTUP_RETRY_DELAY)
+
     mqttc.loop_start()
 
     # Initialisation InfluxDB si activé
