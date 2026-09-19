@@ -492,10 +492,13 @@ print("Lancement téléinfo")
 print(f"Port série: {SERIAL_PORT}")
 
 try:
-    # paho-mqtt 2.x exige explicitement la version de callback API ;
-    # paho-mqtt 1.x ne connaît pas ce paramètre.
-    mqttc = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1, client_id="teleinfo")
+    # paho-mqtt 2.x exige explicitement la version de callback API.
+    # VERSION2 est la version non dépréciée ; VERSION1 déclenche un
+    # DeprecationWarning mais reste utilisable si besoin de compatibilité
+    # avec du code tiers écrit pour l'ancienne API.
+    mqttc = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="teleinfo")
 except AttributeError:
+    # paho-mqtt 1.x : le paramètre CallbackAPIVersion n'existe pas.
     mqttc = mqtt.Client(client_id="teleinfo")
 
 mqttc.username_pw_set(mqtt_username, mqtt_password)
