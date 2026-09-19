@@ -4,6 +4,7 @@
 pyserial>=3.5
 
 # Client MQTT pour la publication vers Home Assistant
+# Compatible paho-mqtt 1.x et 2.x (le script détecte automatiquement l'API disponible)
 paho-mqtt>=1.6.0
 
 # Client InfluxDB pour l'export des données (optionnel)
